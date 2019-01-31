@@ -94,6 +94,9 @@ def _Train(model, eval_model, data_batcher, vocab=None):
         sess = sv.prepare_or_wait_for_session(config=tf.ConfigProto(
             allow_soft_placement=True))
         running_avg_loss = 0
+        stop = [0]*int(FLAGS.max_run_steps*0.1)
+        avg_eval_loss = 0
+        i = 0
         step = 0
         while not sv.should_stop() and step < FLAGS.max_run_steps:
             (article_batch, abstract_batch, targets, article_lens, abstract_lens,
@@ -109,14 +112,20 @@ def _Train(model, eval_model, data_batcher, vocab=None):
             if step % 100 == 0:
                 summary_writer.flush()
                 sys.stdout.write("running_avg_loss: %f\n"%running_avg_loss)
-                _Eval(model, batcher, 10, vocab=vocab,)
+                stop[i] = _Eval(eval_model, data_batcher, 10, i, vocab=vocab)
+                i += 1
+                avg_eval_loss = (stop[i-1] + avg_eval_loss*(i-1))/i
+                if stop[i]-avg_eval_loss<1 and i is not 1:
+                    sys.stdout.write("Eval loss is not decreasing anymore!")
+                    break
         sv.Stop()
         return running_avg_loss
 
 
-def _Eval(model, data_batcher, iteration, vocab=None,):
+def _Eval(model, data_batcher, iteration, count, vocab=None):
     """Runs model eval."""
-    model.build_graph()
+    if count == 0:
+        model.build_graph()
     saver = tf.train.Saver()
     summary_writer = tf.summary.FileWriter(FLAGS.eval_dir)
     sess = tf.Session(config=tf.ConfigProto(allow_soft_placement=True))
@@ -155,7 +164,7 @@ def _Eval(model, data_batcher, iteration, vocab=None,):
         if step % 10 == 0:
             summary_writer.flush()
             sys.stdout.write("eval_avg_loss: %f\n\n\n"%running_avg_loss)
-
+    return running_avg_loss
 
 def main(unused_argv):
     vocab = data.Vocab(FLAGS.vocab_path, 1000000)
